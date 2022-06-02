@@ -40,8 +40,8 @@ var cfg = {
     },
     // MAPI configuration setttings
     merchantapi: {
-      sendPolicy: "RACE_FIRST_SUCCESS",
-      statusPolicy: "RACE_FIRST_SUCCESS",            // "SERIAL_BACKUP"
+      sendPolicy: "SERIAL_BACKUP",
+      statusPolicy: "SERIAL_BACKUP",            // "SERIAL_BACKUP"
       enableResponseLogging: true,              // Whether to log every request and response from merchantapi"s to the database
       endpoints: {
         livenet: [
