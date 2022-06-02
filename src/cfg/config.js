@@ -30,13 +30,13 @@ var cfg = {
     // This is the database connection.
     // Install the schema at src/database/schema-latest.sql
     dbConnection: {
-        host: "localhost",
-        user: "postgres",
-        database: "txq_dev",
-        password: "postgres",
-        port: 5432,
-        max: 3,
-        idleTimeoutMillis: 10000
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      database: process.env.DB_DATABASE,
+      password: process.env.DB_PASSWORD,
+      port: process.env.DB_PORT || 5432,
+      max: 3,
+      idleTimeoutMillis: 10000,
     },
     // MAPI configuration setttings
     merchantapi: {
@@ -47,6 +47,11 @@ var cfg = {
         livenet: [
           {
             name: 'merchantapi.matterpool.io',
+            url: 'https://merchantapi.matterpool.io',
+            headers: {}
+          },
+          {
+            name: 'merchantapi.gorillapool.io',
             url: 'https://merchantapi.matterpool.io',
             headers: {}
           },
