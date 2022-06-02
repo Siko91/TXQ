@@ -180,8 +180,7 @@ export default class EventService {
 		const GARBAGE_CYCLE_TIME_SECONDS = 60;
 		setTimeout(() => {
 			try {
-                // FIX SVEN PIETER SSE KAPOT
-				// this.cleanExpiredFromMaps();
+				this.cleanExpiredFromMaps();
 			} finally {
 				this.garbageCollector();
 			}

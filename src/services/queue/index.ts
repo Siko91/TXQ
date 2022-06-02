@@ -2,61 +2,35 @@ import { Service, Inject } from 'typedi';
 import { IRetryableTask } from '../../interfaces/IRetryableTask';
 import * as cq from 'concurrent-queue';
 import * as backoff from 'exponential-backoff';
-import Config from '../../cfg';
+
 import TransactionStillProcessing from '../../services/error/TransactionStillProcessing';
+import { ISyncQueue } from '@interfaces/IConfig';
+import { IAccountContext } from '@interfaces/IAccountContext';
+import contextFactory from '../../bootstrap/middleware/di/diContextFactory';
 
 @Service('queueService')
 export default class QueueService {
-  tasks;
-  concurrency;
-  cqueue;
-  initialized;
-  tasks_enq;
-  tasks_dup;
-  tasks_expired;
-  tasks_completed;
+  tasks: any = {};
+  cqueue: any = {};
+  initialized: any = {};
   constructor(
     @Inject('updateTxDlq') private updateTxDlq,
     @Inject('incrementTxRetries') private incrementTxRetries,
     @Inject('syncTxStatus') private syncTxStatus,
     @Inject('logger') private logger) {
-    this.tasks = new Map();
-    this.tasks_enq = 0;
-    this.tasks_dup = 0;
-    this.tasks_expired = 0;
-    this.tasks_completed = 0;
-    this.initialize();
   }
 
   public stats() {
     return {
-      queue: {
-        merchantapiRequestConcurrency: Config.queue.merchantapiRequestConcurrency,
-        abandonedSyncTaskRescanSeconds: Config.queue.abandonedSyncTaskRescanSeconds,
-        syncBackoff: {
-          maxDelay: Config.queue.syncBackoff.maxDelay,
-          numOfAttempts: Config.queue.syncBackoff.numOfAttempts,
-          startingDelay: Config.queue.syncBackoff.startingDelay,
-          jitter: Config.queue.syncBackoff.jitter,
-          timeMultiple: Config.queue.syncBackoff.timeMultiple,
-        }
-      },
-      stats: {
-        tasks_pending: this.tasks.size,
-        tasks_enq: this.tasks_enq,
-        tasks_dup: this.tasks_dup,
-        tasks_expired: this.tasks_expired,
-        tasks_completed: this.tasks_completed
-      }
-    }
+    };
   }
 
-  public async initialize(concurrency: number = 3) {
-    if (this.initialized) {
+  public async initialize(queueId, queue: ISyncQueue | undefined) {
+    if (this.initialized.queueId) {
       return;
     }
-    this.concurrency = Config.queue.merchantapiRequestConcurrency || 2;
-    this.cqueue = cq().limit({ concurrency: concurrency }).process((task) => {
+    this.tasks[queueId] = new Map();
+    this.cqueue[queueId] = cq().limit({ concurrency: queue.taskRequestConcurrency }).process((task) => {
       return new Promise(async (resolve) => {
           try {
             await task.invoke();
@@ -87,41 +61,33 @@ export default class QueueService {
           }
       });
     });
-    this.initialized = true;
+    this.initialized[queueId] = true;
   }
 
-  /**
-   *
-   * @param task Task to be retried
-   */
-  public async enqTxStatus(txid: string) {
-    return this.enq({
+  public async enqTxStatus(accountContext: IAccountContext, txid: string) {
+    return this.enq(accountContext, {
       id: txid,
       invoke: async () => {
-        await this.syncTxStatus.run({txid: txid});
+        await this.syncTxStatus.run({accountContext, txid});
       }
     });
   }
 
-  /**
-   *
-   * @param task Task to be retried
-   */
-  public async enq(task: IRetryableTask) {
-    this.initialize();
-    const existingTask = this.tasks.get(task.id);
+  public async enq(accountContext: IAccountContext, task: IRetryableTask) {
+    const queueSettings = contextFactory.getQueueSettings(accountContext);
+    const queueId = accountContext.projectId;
+    this.initialize(queueId, queueSettings);
+    const existingTask = this.tasks[queueId].get(task.id);
     if (existingTask) {
-      this.tasks_dup++;
       return;
     }
-    this.tasks_enq++;
     /**
      * Logic for processing a task
      * @param resolve
      * @param reject
      */
     const taskFunc = (resolve, reject) => {
-      this.cqueue(task).then(function (self) {
+      this.cqueue[queueId](task).then(function (self) {
         if (self.success) {
           return resolve(self);
         } else {
@@ -138,7 +104,8 @@ export default class QueueService {
     const taskFuncWrapper = function () {
       return new Promise(taskFunc);
     }
-    this.tasks.set(task.id, true);
+
+    this.tasks[queueId].set(task.id, true);
 
     // Attempt initially the first time
     try {
@@ -151,34 +118,34 @@ export default class QueueService {
       const backoffResponse = await backoff.backOff(
         async () => taskFuncWrapper(),
         {
-          maxDelay: Config.queue.syncBackoff.maxDelay, // 1000 * 60 * 60 * 16, // 16 hour max
-          numOfAttempts: Config.queue.syncBackoff.numOfAttempts,
-          delayFirstAttempt: true,
-          startingDelay: Config.queue.syncBackoff.startingDelay,
-          jitter: Config.queue.syncBackoff.jitter,
-          timeMultiple: Config.queue.syncBackoff.timeMultiple,
+          maxDelay: queueSettings.syncBackoff.maxDelay, // 1000 * 60 * 60 * 16, // 16 hour max
+          numOfAttempts: queueSettings.syncBackoff.numOfAttempts,
+          delayFirstAttempt: false,
+          startingDelay: queueSettings.syncBackoff.startingDelay,
+          jitter: queueSettings.syncBackoff.jitter,
+          timeMultiple: queueSettings.syncBackoff.timeMultiple,
           retry: (lastError: any, attemptNumber: number) => {
             this.logger.info('sync_retry', {
               txid: task.id,
-              attemptNumber: attemptNumber,
-              lastError: lastError
+              attemptNumber,
+              lastError,
+              projectId: accountContext.projectId
             });
-            this.incrementTxRetries.run({txid: task.id});
+            this.incrementTxRetries.run({accountContext, txid: task.id});
             return true;
           }
         }
       );
-      this.tasks_completed++;
       this.logger.info('sync_complete', backoffResponse);
-      this.tasks.delete(task.id);
+      this.tasks[queueId].delete(task.id);
     } catch (e) {
-      this.tasks_expired++;
       this.logger.error('sync_expired', {
         txid: task.id,
-        lasterror: e
+        lasterror: e,
+        laststack: e.stack
       });
-      this.updateTxDlq.run({txid: task.id, dlq: 'dead'});
-      this.tasks.delete(task.id);
+      this.updateTxDlq.run({accountContext, txid: task.id, dlq: 'dead'});
+      this.tasks[queueId].delete(task.id);
     }
   }
 

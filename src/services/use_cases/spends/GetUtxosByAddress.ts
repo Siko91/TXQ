@@ -1,6 +1,9 @@
 import { Service, Inject } from 'typedi';
 import { UseCase } from '../UseCase';
 import { UseCaseOutcome } from '../UseCaseOutcome';
+import { ITxOut } from '@interfaces/ITxOut';
+import { TxFormatter } from '../../../services/helpers/TxFormatter';
+import { IAccountContext } from '@interfaces/IAccountContext';
 
 @Service('getUtxosByAddress')
 export default class GetUtxosByAddress extends UseCase {
@@ -11,20 +14,11 @@ export default class GetUtxosByAddress extends UseCase {
     super();
   }
 
-  public async run(params: { address: string, limit: any, script?: boolean, offset: any}): Promise<UseCaseOutcome> {
-    let entities = await this.txoutService.getTxoutByAddress(params.address, params.offset, params.limit, params.script, true);
-    let utxoFormatted = [];
+  public async run(params: { address: string, limit: any, script?: boolean, offset: any, accountContext?: IAccountContext}): Promise<UseCaseOutcome> {
+    let entities = await this.txoutService.getTxoutByAddress(params.accountContext, params.address, params.offset, params.limit, params.script, true);
+    let utxoFormatted: ITxOut[] = [];
     utxoFormatted = entities.map((e) => {
-      return {
-        txid: e.txid,
-        vout: e.index,
-        outputIndex: e.index,
-        value: e.satoshis,
-        satoshis: e.satoshis,
-        script: e.script,
-        address: e.address,
-        scripthash: e.scripthash
-      }
+      return TxFormatter.formatTxoutWithEmbeddedStatusHeight(e);
     })
     return {
       success: true,

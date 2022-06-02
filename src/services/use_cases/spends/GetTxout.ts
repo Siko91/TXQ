@@ -2,6 +2,8 @@ import { Service, Inject } from 'typedi';
 import { UseCase } from '../UseCase';
 import { UseCaseOutcome } from '../UseCaseOutcome';
 import ResourceNotFoundError from '../../error/ResourceNotFoundError';
+import { TxFormatter } from '../../../services/helpers/TxFormatter';
+import { IAccountContext } from '@interfaces/IAccountContext';
 @Service('getTxout')
 export default class GetTxout extends UseCase {
 
@@ -11,8 +13,8 @@ export default class GetTxout extends UseCase {
     super();
   }
 
-  public async run(params: { txid: string, index: any, script?: boolean}): Promise<UseCaseOutcome> {
-    let entity = await this.txoutService.getTxout(params.txid, params.index, params.script);
+  public async run(params: { txid: string, index: any, script?: boolean, accountContext?: IAccountContext}): Promise<UseCaseOutcome> {
+    let entity = await this.txoutService.getTxout(params.accountContext, params.txid, params.index, params.script);
     if (!entity) {
       throw new ResourceNotFoundError();
     }
@@ -20,7 +22,7 @@ export default class GetTxout extends UseCase {
       success: true,
       result: [
         {
-          ...entity
+          ...(TxFormatter.formatTxoutWithEmbeddedStatusHeight(entity))
         }
       ]
     };

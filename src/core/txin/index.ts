@@ -1,16 +1,24 @@
 import { Service, Inject } from 'typedi';
-import { sql, DatabaseConnectionType } from 'slonik';
+import { IAccountContext } from '@interfaces/IAccountContext';
+import { ContextFactory } from '../../bootstrap/middleware/di/diContextFactory';
 
 @Service('txinModel')
 class TxinModel {
-  constructor(@Inject('db') private db: DatabaseConnectionType) {}
+  constructor(@Inject('db') private db: ContextFactory) {}
 
-  public async save(txid: string, index: number, prevTxId: string, prevIndex: number, unlockScript: string): Promise<string> {
-    let result: any = await this.db.query(sql`INSERT INTO txin(txid, index, prevtxid, previndex, unlockscript) VALUES (${txid}, ${index}, ${prevTxId}, ${prevIndex}, ${unlockScript}) ON CONFLICT(txid, index) DO NOTHING`);
+  public async save(accountContext: IAccountContext, txid: string, index: number, prevTxId: string, prevIndex: number, unlockScript: string): Promise<string> {
+    const client = await this.db.getClient(accountContext);
+    let result: any = await client.query(`
+    INSERT INTO txin(txid, index, prevtxid, previndex, unlockscript)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT(txid, index) DO NOTHING`, [
+      txid, index, prevTxId, prevIndex, unlockScript
+    ]);
     return result;
   }
-  public async getTxinByPrev(prevtxid: string, previndex: number): Promise<string> {
-    let result: any = await this.db.query(sql`SELECT * FROM txin WHERE prevtxid = ${prevtxid} AND previndex = ${previndex}`);
+  public async getTxinByPrev(accountContext: IAccountContext, prevtxid: string, previndex: number): Promise<string> {
+    const client = await this.db.getClient(accountContext);
+    let result: any = await client.query(`SELECT * FROM txin WHERE prevtxid = $1 AND previndex = $2` , [prevtxid, previndex]);
     return result.rows[0];
   }
 }

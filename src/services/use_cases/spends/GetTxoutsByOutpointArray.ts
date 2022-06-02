@@ -2,6 +2,8 @@ import { Service, Inject } from 'typedi';
 import { UseCase } from '../UseCase';
 import { UseCaseOutcome } from '../UseCaseOutcome';
 import InvalidParamError from '../../error/InvalidParamError';
+import { TxFormatter } from '../../../services/helpers/TxFormatter';
+import { IAccountContext } from '@interfaces/IAccountContext';
 @Service('getTxoutsByOutpointArray')
 export default class GetTxoutsByOutpointArray extends UseCase {
 
@@ -11,7 +13,7 @@ export default class GetTxoutsByOutpointArray extends UseCase {
     super();
   }
 
-  public async run(params: { txOutpoints: string, script?: boolean}): Promise<UseCaseOutcome> {
+  public async run(params: { txOutpoints: string, script?: boolean, accountContext?: IAccountContext}): Promise<UseCaseOutcome> {
     let split = params.txOutpoints.split(',');
     const TXOUTPOINT_REGEX = new RegExp(/^([0-9a-fA-F]{64})\_o(\d+)$/);
     const outpoints: Array<{  txid: string, index: number }> = []
@@ -27,10 +29,10 @@ export default class GetTxoutsByOutpointArray extends UseCase {
         index: parsed,
       })
     }
-    let entities = await this.txoutService.getTxoutsByOutpointArray(outpoints, params.script);
+    let entities = await this.txoutService.getTxoutsByOutpointArray(params.accountContext, outpoints, params.script);
     return {
       success: true,
-      result: entities
+      result: TxFormatter.formatTxoutsWithEmbeddedStatusHeight(entities)
     };
   }
 }

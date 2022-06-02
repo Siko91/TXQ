@@ -1,5 +1,4 @@
 import 'reflect-metadata';
-//import 'module-alias/register';
 import { createServer } from 'http';
 import * as SetTimeZone from 'set-tz';
 import { handleServerExit, handleExceptions } from './middleware/errorMiddleware';
@@ -17,8 +16,13 @@ import "../services/spend/index";
 import "../services/event/index";
 import "../services/txoutgroup/index";
 import "../services/updatelog/index";
+import "../services/txstore/index";
 
 import "../services/helpers/MerchantRequestor";
+
+import "../services/use_cases/proxy/GetMapiTxStatus";
+import "../services/use_cases/proxy/GetMapiTxFeeQuote";
+import "../services/use_cases/proxy/PushMapiTx";
 
 import "../services/use_cases/tx/GetTx";
 import "../services/use_cases/tx/SaveTxs";
@@ -29,7 +33,10 @@ import "../services/use_cases/tx/EnqInitialTxsForSync";
 import "../services/use_cases/tx/IncrementTxRetries";
 import "../services/use_cases/tx/UpdateTxDlq";
 
+import "../services/use_cases/system/GetSystemStatus";
+
 import "../services/use_cases/queue/GetTxsDlq";
+import "../services/use_cases/queue/RequeueTxsDlq";
 import "../services/use_cases/queue/ResyncTx";
 import "../services/use_cases/queue/GetQueueStats";
 import "../services/use_cases/queue/GetTxsPending";
@@ -52,9 +59,13 @@ import "../services/use_cases/txoutgroup/GetTxoutgroupListByScriptid";
 import "../services/use_cases/txoutgroup/AddGroupScriptIds";
 import "../services/use_cases/txoutgroup/DeleteGroupScriptIds";
 
+import "../services/use_cases/txstore/GetTxStore";
+import "../services/use_cases/txstore/GetTxStoreRevisions";
+import "../services/use_cases/txstore/SaveTxStore";
+
 SetTimeZone('UTC');
 
-import EnqInitialTxsForSync from '../services/use_cases/tx/EnqInitialTxsForSync';
+import EnqInitialTxsForSyncAllProjects from '../services/use_cases/tx/EnqInitialTxsForSyncAllProjects';
 import { createExpress } from './express-factory';
 
 async function startServer() {
@@ -63,11 +74,12 @@ async function startServer() {
 
   app.get('/', function(req, res) {
     res.json({
-      txq: 'hello'
-    })
+      hello: 'world'
+    });
   });
   server.listen(Config.api.port);
-
+  console.log('Listening on', Config.api.port);
+  
   process.on('unhandledRejection', handleExceptions);
   process.on('uncaughtException', handleExceptions);
   process.on('SIGINT', handleServerExit('SIGINT', server));
@@ -81,15 +93,14 @@ startServer();
  * Check ever N minutes for jobs that are in DB in 'pending' that may need to be enqueued
  */
 async function startPendingTaskPoller() {
-  let enqInitialTxsForSync = Container.get(EnqInitialTxsForSync);
+  console.log('sd');
+  let enqInitialTxsForSync = Container.get(EnqInitialTxsForSyncAllProjects);
   enqInitialTxsForSync.run();
 }
 
 setInterval(() => {
   startPendingTaskPoller();
-}, Config.queue.abandonedSyncTaskRescanSeconds * 1000);
+}, 5 * 60 * 1000);
 
-startPendingTaskPoller();
-
-
+ console.log('s');
 

@@ -9,6 +9,8 @@ import { ITransactionData } from '../../../interfaces/ITransactionData';
 import { EventTypes } from '../../../services/event';
 import { txDataExtractor } from '../../../util/txdataextractor';
 import Config from './../../../cfg';
+import { IAccountContext } from '@interfaces/IAccountContext';
+import contextFactory from '../../../bootstrap/middleware/di/diContextFactory';
 
 @Service('saveTxs')
 export default class SaveTxs extends UseCase {
@@ -33,9 +35,12 @@ export default class SaveTxs extends UseCase {
     channel?: string,
     set: {
       [key: string]: ITransactionData
-    }
+    },
+    accountContext?: IAccountContext
   }): Promise<UseCaseOutcome> {
     try {
+      const queueSettings = contextFactory.getQueueSettings(params.accountContext);
+      const network = contextFactory.getNetwork(params.accountContext);
       let cleanedChannel = params.channel ? params.channel : '';
       const savedTxs = [];
       for (const txid in params.set) {
@@ -43,12 +48,12 @@ export default class SaveTxs extends UseCase {
           continue;
         }
         this.logger.info('SaveTxs', {
-          txid: txid
+          projectId: params.accountContext.projectId,
+          txid
         });
         let expectedTxid = txid;
-        let didExistBefore = await this.txmetaService.isTxMetaExist(txid, cleanedChannel);
-        // Do not sync if set globally
-        const nosync = Config.queue.nosync ? Config.queue.nosync : !!params.set[txid].nosync;
+        let didExistBefore = await this.txmetaService.isTxMetaExist(params.accountContext, txid, cleanedChannel);
+        const nosync = queueSettings.nosync || !!params.set[txid].nosync;
         const rawtx = params.set[txid].rawtx;
         const metadata = params.set[txid].metadata;
         const tags = params.set[txid].tags;
@@ -74,20 +79,24 @@ export default class SaveTxs extends UseCase {
 
         if (rawtx) {
           await this.txService.saveTx(
+            params.accountContext,
             rawtx
           );
         } else {
           await this.txService.saveTxid(
+            params.accountContext,
             expectedTxid
           );
         }
 
         if (parsedTx) {
           await this.txinService.saveTxins(
+            params.accountContext,
             parsedTx
           );
         }
         await this.txmetaService.saveTxmeta(
+          params.accountContext,
           expectedTxid,
           cleanedChannel,
           metadata,
@@ -106,7 +115,7 @@ export default class SaveTxs extends UseCase {
             }
             const prevTxId = input.prevTxId.toString('hex');
             const outputIndex = input.outputIndex;
-            await this.spendService.updateSpendIndex(
+            await this.spendService.updateSpendIndex(params.accountContext,
               prevTxId, outputIndex, parsedTx.hash, i
             );
             i++;
@@ -117,11 +126,12 @@ export default class SaveTxs extends UseCase {
             const scripthash = bsv.crypto.Hash.sha256(buffer).reverse().toString('hex');
             let address = '';
             try {
-              address = bsv.Address.fromScript(parsedTx.outputs[i].script, Config.network).toString();
+              address = bsv.Address.fromScript(parsedTx.outputs[i].script, network).toString();
             } catch (err) {
               // Do nothing
             }
             await this.txoutService.saveTxout(
+              params.accountContext,
               expectedTxid,
               i,
               address,
@@ -146,57 +156,55 @@ export default class SaveTxs extends UseCase {
             });
 
             await this.spendService.backfillSpendIndexIfNeeded(
+              params.accountContext,
               parsedTx.hash, i
             );
           }
         }
 
         await this.txsyncService.insertTxsync(
+          params.accountContext,
           expectedTxid,
           nosync
         );
 
         if (!nosync) {
-          this.queueService.enqTxStatus(txid);
+          this.queueService.enqTxStatus(params.accountContext, txid);
         }
 
         savedTxs.push(expectedTxid);
-        let useCaseOutcome = await this.getTx.run({ txid: expectedTxid, channel: cleanedChannel, rawtx: true});
+        let useCaseOutcome = await this.getTx.run({ accountContext: params.accountContext, txid: expectedTxid, channel: cleanedChannel, rawtx: true });
         for (const item of notifyWithEntities) {
           const scriptIds = [];
           if (item.address) {
             scriptIds.push(item.address);
-            this.eventService.pushChannelEvent('address-' + item.address, item.wrappedEntity, -1);
+            this.eventService.pushChannelEvent(params.accountContext, 'address-' + item.address, item.wrappedEntity, -1);
           }
           if (item.scripthash) {
             scriptIds.push(item.scripthash);
-            this.eventService.pushChannelEvent('scripthash-' + item.scripthash, item.wrappedEntity, -1);
+            this.eventService.pushChannelEvent(params.accountContext, 'scripthash-' + item.scripthash, item.wrappedEntity, -1);
           }
           // Now get all the groups to be notified
-          const txoutgroups = await this.txoutgroupService.getTxoutgroupNamesByScriptIds(scriptIds);
+          const txoutgroups = await this.txoutgroupService.getTxoutgroupNamesByScriptIds(params.accountContext, scriptIds);
           for (const txoutgroup of txoutgroups) {
-            this.eventService.pushChannelEvent('groupby-' + txoutgroup.groupname, item.wrappedEntity, -1);
+            this.eventService.pushChannelEvent(params.accountContext, 'groupby-' + txoutgroup.groupname, item.wrappedEntity, -1);
           }
         }
 
         const entityNotif = { entity: useCaseOutcome.result, eventType: EventTypes.newtx};
         if (!didExistBefore) {
-          this.eventService.pushChannelEvent(cleanedChannel, entityNotif, useCaseOutcome.result.id);
-          if (Config.enableUpdateLogging) {
-            await this.updatelogService.save(EventTypes.newtx, cleanedChannel, useCaseOutcome.result, expectedTxid);
-          }
+          this.eventService.pushChannelEvent(params.accountContext, cleanedChannel, entityNotif, useCaseOutcome.result.id);
+          await this.updatelogService.save(params.accountContext, EventTypes.newtx, cleanedChannel, useCaseOutcome.result, expectedTxid);
         } else {
           entityNotif.eventType = EventTypes.updatetx;
-          this.eventService.pushChannelEvent(cleanedChannel, entityNotif, useCaseOutcome.result.id);
-          if (Config.enableUpdateLogging) {
-            await this.updatelogService.save(EventTypes.updatetx, cleanedChannel, useCaseOutcome.result, expectedTxid);
-          }
+          this.eventService.pushChannelEvent(params.accountContext, cleanedChannel, entityNotif, useCaseOutcome.result.id);
+          await this.updatelogService.save(params.accountContext, EventTypes.updatetx, cleanedChannel, useCaseOutcome.result, expectedTxid);
         }
 
         this.logger.info('SaveTxs', {
-          txid: txid,
+          txid,
           status: 'Complete',
-          didExistBefore: didExistBefore
+          didExistBefore,
         });
       }
       return {
@@ -205,7 +213,7 @@ export default class SaveTxs extends UseCase {
       };
     } catch (exception) {
       this.logger.info('SaveTxs', {
-        exception: exception,
+        exception,
         stack: exception.stack,
         channel: params.channel
       });

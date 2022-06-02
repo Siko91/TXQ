@@ -1,6 +1,8 @@
 import { Service, Inject } from 'typedi';
 import { UseCase } from '../UseCase';
 import { UseCaseOutcome } from '../UseCaseOutcome';
+import { TxFormatter } from '../../../services/helpers/TxFormatter';
+import { IAccountContext } from '@interfaces/IAccountContext';
 @Service('getUtxosByScriptHash')
 export default class GetUtxosByScriptHash extends UseCase {
 
@@ -10,20 +12,11 @@ export default class GetUtxosByScriptHash extends UseCase {
     super();
   }
 
-  public async run(params: { scripthash: string, script?: boolean, limit: any, offset: any }): Promise<UseCaseOutcome> {
-    let entities = await this.txoutService.getTxoutByScriptHash(params.scripthash, params.offset, params.limit, params.script, true);
+  public async run(params: { scripthash: string, script?: boolean, limit: any, offset: any, accountContext?: IAccountContext}): Promise<UseCaseOutcome> {
+    let entities = await this.txoutService.getTxoutByScriptHash(params.accountContext, params.scripthash, params.offset, params.limit, params.script, true);
     let utxoFormatted = [];
     utxoFormatted = entities.map((e) => {
-      return {
-        txid: e.txid,
-        vout: e.index,
-        outputIndex: e.index,
-        value: e.satoshis,
-        satoshis: e.satoshis,
-        script: e.script,
-        address: e.address,
-        scripthash: e.scripthash
-      }
+      return TxFormatter.formatTxoutWithEmbeddedStatusHeight(e);
     })
     return {
       success: true,

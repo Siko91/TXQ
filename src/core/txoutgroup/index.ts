@@ -1,67 +1,73 @@
 import { Service, Inject } from 'typedi';
-import { sql, DatabaseConnectionType } from 'slonik';
+import { IOutputGroupEntry } from '@interfaces/IOutputGroupEntry';
+import { IAccountContext } from '@interfaces/IAccountContext';
+import { ContextFactory } from '../../bootstrap/middleware/di/diContextFactory';
 
 @Service('txoutgroupModel')
 class TxoutgroupModel {
-  constructor(@Inject('db') private db: DatabaseConnectionType) {}
+  constructor(@Inject('db') private db: ContextFactory) {}
 
-  public async getTxoutgroupByName(groupname: string, offset: number = 0, limit: number = 100000): Promise<any> {
-    const s = sql`
+  public async getTxoutgroupByName(accountContext: IAccountContext, groupname: string, offset: number = 0, limit: number = 100000): Promise<any> {
+    const client = await this.db.getClient(accountContext);
+    const s = `
     SELECT * FROM txoutgroup
-    WHERE groupname = ${groupname} ORDER BY created_at DESC OFFSET ${offset} LIMIT ${limit}`;
-    const result = await this.db.query(s);
+    WHERE groupname = $1 ORDER BY created_at DESC OFFSET $2 LIMIT $3`;
+    const result = await client.query(s, [ groupname, offset, limit] );
     return result.rows;
   }
 
-  public async getTxoutgroupNamesByScriptId(scriptId: string): Promise<any> {
-    const s = sql`
+  public async getTxoutgroupNamesByScriptId(accountContext: IAccountContext, scriptId: string): Promise<any> {
+    const client = await this.db.getClient(accountContext);
+    const s = `
     SELECT * FROM txoutgroup
-    WHERE scriptid = ${scriptId}`;
-    const result = await this.db.query(s);
+    WHERE scriptid = $1`;
+    const result = await client.query(s, [ scriptId ]);
     return result.rows;
   }
 
-  public async getTxoutgroupNamesByScriptIds(scriptIds: string[]): Promise<any> {
-    const str = sql`
+  public async getTxoutgroupNamesByScriptIds(accountContext: IAccountContext, scriptIds: string[]): Promise<any> {
+    const client = await this.db.getClient(accountContext);
+    const str = `
     SELECT * FROM txoutgroup
-    WHERE scriptid = ANY(${sql.array(scriptIds, 'varchar')})`;
-    const result = await this.db.query(str);
+    WHERE scriptid IN (${this.joinQuote(scriptIds)})`;
+    const result = await client.query(str);
     return result.rows;
   }
 
-  public saveTxoutgroups(groupname: string, scriptids: string[]): Promise<any> {
-    let expandedInserts = scriptids.map((item) => {
-      return [ groupname, item, Math.round((new Date()).getTime() / 1000) ];
+  public async saveTxoutgroups(accountContext: IAccountContext, groupname: string, items: IOutputGroupEntry[]): Promise<any> {
+    const client = await this.db.getClient(accountContext);
+    let expandedInserts = items.map((item) => {
+      return `( '${groupname}', '${item.scriptid}', '${item.metadata ? JSON.stringify(item.metadata) : null }', ${Math.round((new Date()).getTime() / 1000)} )`;
     });
-    const s = sql`
-    INSERT INTO txoutgroup(groupname, scriptid, created_at)
-    SELECT *
-    FROM ${sql.unnest(
-      expandedInserts,
-      [
-        'varchar[]',
-        'varchar[]',
-        'int4'
-      ]
-    )} ON CONFLICT DO NOTHING`;
-    return this.db.query(s);
+    const s = `
+    INSERT INTO txoutgroup(groupname, scriptid, metadata, created_at)
+    VALUES
+    ${expandedInserts}
+    ON CONFLICT(groupname, scriptid) DO UPDATE SET metadata = excluded.metadata`;
+    return client.query(s);
   }
 
-  public async deleteTxoutgroupByName(groupname: string): Promise<any> {
-    const result = await this.db.query(sql`
+  public async deleteTxoutgroupByName(accountContext: IAccountContext, groupname: string): Promise<any> {
+    const client = await this.db.getClient(accountContext);
+    const result = await client.query(`
     DELETE FROM txoutgroup
-    WHERE groupname = ${groupname}`);
+    WHERE groupname = $1`, [ groupname ]);
     return result.rows;
   }
 
-  public async deleteTxoutgroupByGroupAndScriptids(groupname: string, scriptids: string[]): Promise<any> {
-    const result = await this.db.query(sql`
+  public async deleteTxoutgroupByGroupAndScriptids(accountContext: IAccountContext, groupname: string, scriptids: string[]): Promise<any> {
+    const client = await this.db.getClient(accountContext);
+    const result = await client.query(`
     DELETE FROM txoutgroup
-    WHERE groupname = ${groupname} AND
-    scriptid = ANY(${sql.array(scriptids, 'varchar')})`);
+    WHERE groupname = $1 AND
+    scriptid IN (${this.joinQuote(scriptids)})`, [ groupname ]);
     return result.rows;
   }
 
+
+  private joinQuote(arr: string[]): string {
+    return "'" + arr.join("','") + "'";
+  }
 }
 
 export default TxoutgroupModel;

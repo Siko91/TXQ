@@ -10,7 +10,6 @@
 
 ![TXQ](https://github.com/MatterPool/TXQ/blob/master/preview.png "Bitcoin Transaction Storage Queue Service")
 
-
 - [Motivation](#motivation)
 - [Installation & Getting Started](#installation---getting-started)
 - [Database](#database)
@@ -46,6 +45,7 @@
   * [Get Balance By Group](#get-balance-by-group)
   * [Get Queue Stats](#get-queue-stats)
   * [Get Dead-Letter Transactions Queue](#get-dead-letter-transactions-queue)
+  * [Requeue Transactions in Dead-Letter Queue](#requeue-transactions-in-dead-letter-queue)
   * [Force Resync of Transaction](#force-resync-of-transaction)
   * [Get Queue Tasks by Sync Status](#get-queue-tasks-by-sync-status)
 - [Server Sent Events (SSE)](#server-sent-events--sse-)
@@ -64,6 +64,7 @@
   * [Query by Index of Miner Merchant API](#query-by-index-of-miner-merchant-api)
 - [Database Schema and Design](#database-schema-and-design)
 - [Additional Resources](#additional-resources)
+
 
 ## Motivation
 
@@ -139,62 +140,7 @@ Migrations:
 
 #### NOTE: Configure to use 'testnet' by setting network: 'testnet' or leave undefined (mainnet)
 
-See `cfg/index.ts` for available options.
-
-```javascript
-{
-    network: undefined, // Set to 'testnet' for testnet addresses
-    // ...
-    queue: {
-      // Max number of concurrent requests to sync tx status from merchantapi
-      taskRequestConcurrency: process.env.MERCHANT_API_CONCURRENCY ? parseInt(process.env.MERCHANT_API_CONCURRENCY) : 3,
-      abandonedSyncTaskRescanSeconds: 60,       // How many seconds to rescan for missed tasks
-      syncBackoff: {
-        // 'full' or 'none'
-        jitter: process.env.SYNC_JITTER ? process.env.SYNC_JITTER : 'none',
-        // Exponential back off multiple
-        timeMultiple: process.env.SYNC_BACKOFF_MULTIPLE ? parseInt(process.env.SYNC_BACKOFF_MULTIPLE) : 2,
-        // Initial start delay before first re-check
-        startingDelay: process.env.SYNC_START_DELAY ? parseInt(process.env.SYNC_START_DELAY) : 1000 * 60,
-        // Max back off time. 20 Minutes is max
-        maxDelay: process.env.SYNC_MAX_DELAY ? parseInt(process.env.SYNC_MAX_DELAY) : 1000 * 60 * 20,
-        // Max attempts before being put into 'dlq'
-        numOfAttempts: process.env.SYNC_MAX_ATTEMPTS ? parseInt(process.env.SYNC_MAX_ATTEMPTS) : 20
-      },
-      // If 'nosync' is true, then the server process always places new transactions into txsync.state=0 (sync_none)
-      // In other words, then TXQ behaves as a datastore and makes no attempts to broadcast transations or settle status.
-      nosync: false
-    },
-    enableUpdateLogging: true,                  // Whether to log every update entity to the database
-    merchantapi: {
-      sendPolicy: 'ALL_FIRST_PRIORITY_SUCCESS', // 'SERIAL_BACKUP' | 'ALL_FIRST_PRIORITY_SUCCESS';
-      statusPolicy: 'SERIAL_BACKUP',            // 'SERIAL_BACKUP'
-      enableResponseLogging: true,              // Whether to log every request and response from merchantapi's to the database
-      enableProxy: true,                        // Exposes /merchantapi/<miner name>/mapi/tx endpoints...
-      endpoints: [
-        {
-          name: 'matterpool.io',
-          url: 'https://merchantapi.matterpool.io',
-          headers: {
-          }
-        },
-        {
-          name: 'taal.com',
-          url: 'https://merchantapi.taal.com',
-          headers: {
-          }
-        },
-        {
-          name: 'mempool.io',
-          url: 'https://www.ddpurse.com/openapi',
-          headers: {
-            token: "561b756d12572020ea9a104c3441b71790acbbce95a6ddbf7e0630971af9424b"
-          }
-        },
-      ]
-    },
-    //...
-```
+See `cfg/config.sample.js` for available options.
 
 ## TXQ Design Overview...
 
@@ -807,16 +753,19 @@ Retrieve the balance for scripthashes
 
 `POST /api/v1/txoutgroup/:groupname`
 
+Optionally provide `metadata` to tag addresses and scripts with metadata (ex: track child derivation paths or anything)
+
 POST Request Body:
 
 ```javascript
 {
- "scriptids": [
-   "0012",
-   "address1",
-   "scripthash1"
+ "items": [
+   { "scriptid": "032132442", "metadata": { "foo": 1233 } },
+   { "scriptid": "13jbh6Ps6p4GEfNVbZpp6AwqWFrkWQmaWN" },
+   { "scriptid": "scripthash1", "metadata": { "something": "else" } }
  ]
 }
+
 ```
 Add the output script pattern tagged into the group.  Can be an address or scripthash. This allows you to group outputs by xpub, userid, or any category.
 
@@ -838,12 +787,14 @@ Response Body
         {
             "groupname": "mykey",
             "scriptid": "131xY3twRUJ1Y9Z9jJFKGLUa4SAdRJppcW",
-            "created_at": 1594930920
+            "created_at": 1594930920,
+            "metadata": null
         },
         {
             "groupname": "mykey",
             "scriptid": "13jbh6Ps6p4GEfNVbZpp6AwqWFrkWQmaWN",
-            "created_at": 1594921596
+            "created_at": 1594921596,
+            "metadata": { "something": "else" }
         }
     ]
 }
@@ -1038,6 +989,23 @@ A transaction that is expired, will not be retried unless it is forced to `resyn
   "result": [ 'dc7bed6c302c08b7bafd94bfb1086883a134861fe9f212fc8052fcaadcde2293' ]
 }
 ```
+
+### Requeue Transactions in Dead-Letter Queue
+
+`POST /api/v1/queue/requeue?limit=20`
+`POST /api/v1/queue/requeue/:dlq?limit=20`
+
+Retry up to `limit` dead letter queued transactions. Returns the array of txids that are requeued.
+The `limit` gives you the ability to slowly requeue insstead of all at once.
+
+```javascript
+{
+  "status": 200,
+  "errors": [],
+  "result": [ 'dc7bed6c302c08b7bafd94bfb1086883a134861fe9f212fc8052fcaadcde2293' ]
+}
+```
+
 
 ### Force Resync of Transaction
 

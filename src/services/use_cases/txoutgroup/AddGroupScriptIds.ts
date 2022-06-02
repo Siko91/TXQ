@@ -1,6 +1,8 @@
 import { Service, Inject } from 'typedi';
 import { UseCase } from '../UseCase';
 import { UseCaseOutcome } from '../UseCaseOutcome';
+import { IOutputGroupEntry } from '@interfaces/IOutputGroupEntry';
+import { IAccountContext } from '@interfaces/IAccountContext';
 
 @Service('addGroupScriptIds')
 export default class AddGroupScriptIds extends UseCase {
@@ -11,8 +13,8 @@ export default class AddGroupScriptIds extends UseCase {
     super();
   }
 
-  public async run(params: { groupname: string, scriptids: string[]}): Promise<UseCaseOutcome> {
-    await this.txoutgroupService.saveTxoutgroups(params.groupname, params.scriptids);
+  public async run(params: { groupname: string, items: IOutputGroupEntry[], accountContext?: IAccountContext}): Promise<UseCaseOutcome> {
+    await this.txoutgroupService.saveTxoutgroups(params.accountContext, params.groupname, params.items);
     return {
       success: true,
       result: {}
