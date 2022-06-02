@@ -1,104 +1,81 @@
-import * as dotenv from 'dotenv-safe';
-import { IConfig } from '@interfaces/IConfig';
-
-const envFound = dotenv.config();
-
-if (!envFound) {
-  throw new Error("⚠️  Couldn't find .env file  ⚠️");
-}
-
-const config: IConfig = {
-  appname: 'txq',
-  network: process.env.NETWORK === 'testnet' ? 'testnet' : 'livenet', // Set the merchantapi.endpoints below for testnet
-  baseurl: process.env.BASEURL || 'http://localhost:8097',
-  env: process.env.NODE_ENV || 'development',
-  api: {
-    prefix: '/api',
-    port: process.env.PORT || 3000,
-    jwt: {
-      secret: 'secret', // update before deployment
-      expiresInHours: 24, // 24 hrs, update before deployment
+var cfg = {
+  default: {
+    enabled: true,
+    network: "livenet",
+    keysRequired: false,
+    apiKeys: ["somekey1", "somekey2"],
+    serviceKeys: ["servicekey1"],
+    hosts: ["*", "localhost:8097", "myhostname.com", "api.somewhere1332.io"],
+    queue: {
+      // Max number of concurrent requests to sync tx status from merchantapi
+      taskRequestConcurrency: 1,
+      abandonedSyncTaskRescanSeconds: 3600, // How many seconds to rescan for missed tasks
+      syncBackoff: {
+        // 'full' or 'none'
+        jitter: "full",
+        // Exponential back off multiple
+        timeMultiple: 2,
+        // Initial start delay before first status check
+        startingDelay: 1000 * 60,
+        // Max back off time 30 Minutes is max
+        maxDelay: 1000 * 30 * 60,
+        // Max attempts before being put into 'dlq'
+        numOfAttempts: 25,
+      },
+      // If 'nosync' is true, then the server process always places new transactions into txsync.state=0 (sync_none)
+      // In other words, then TXQ behaves as a datastore and makes no attempts to broadcast transations or settle status.
+      nosync: false,
     },
-    bcrypt: {
-      rounds: 8,
+    // MAPI configuration setttings
+    merchantapi: {
+      sendPolicy: "SERIAL_BACKUP",
+      statusPolicy: "SERIAL_BACKUP", // "SERIAL_BACKUP"
+      enableResponseLogging: true, // Whether to log every request and response from merchantapi"s to the database
+      endpoints: {
+        livenet: [
+          {
+            name: 'merchantapi.matterpool.io',
+            url: 'https://merchantapi.matterpool.io',
+            headers: {}
+          },
+          {
+            name: "merchantapi.taal.com",
+            url: "https://merchantapi.taal.com",
+            headers: {
+              Authorization: process.env.MERCHANTAPI_KEY_TAAL_MAINNET || "mainnet_fad153b62723dc39571937c79072b33b"
+            },
+          },
+          {
+            name: "mempool.io",
+            url: "https://www.ddpurse.com/openapi",
+            headers: {
+              token: process.env.MERCHANTAPI_KEY_MEMPOOL_MAINNET || "561b756d12572020ea9a104c3441b71790acbbce95a6ddbf7e0630971af9424b",
+            },
+          },
+        ],
+        testnet: [
+          {
+            name: "merchantapi2.taal.com",
+            url: "https://merchantapi2.taal.com",
+            headers: {
+              Authorization: process.env.MERCHANTAPI_KEY_TAAL_TESTNET || "testnet_d92f1c4dfa6309cf83430664a397dde1"
+            },
+          },
+        ],
+      },
+    },
+    // This is the database connection.
+    // Install the schema at src/database/schema-latest.sql
+    dbConnection: {
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      database: process.env.DB_DATABASE,
+      password: process.env.DB_PASSWORD,
+      port: process.env.DB_PORT || 5432,
+      max: 3,
+      idleTimeoutMillis: 10000,
     },
   },
-  queue: {
-    // Max number of concurrent requests to sync tx status from merchantapi
-    taskRequestConcurrency: process.env.MERCHANT_API_CONCURRENCY ? parseInt(process.env.MERCHANT_API_CONCURRENCY) : 3,
-    abandonedSyncTaskRescanSeconds: 60,       // How many seconds to rescan for missed tasks
-    syncBackoff: {
-      // 'full' or 'none'
-      jitter: process.env.SYNC_JITTER ? process.env.SYNC_JITTER : 'none',
-      // Exponential back off multiple
-      timeMultiple: process.env.SYNC_BACKOFF_MULTIPLE ? parseInt(process.env.SYNC_BACKOFF_MULTIPLE) : 2,
-      // Initial start delay before first re-check
-      startingDelay: process.env.SYNC_START_DELAY ? parseInt(process.env.SYNC_START_DELAY) : 1000 * 60,
-      // Max back off time. 10 Minutes is max
-      maxDelay: process.env.SYNC_MAX_DELAY ? parseInt(process.env.SYNC_MAX_DELAY) : 1000 * 60 * 10,
-      // Max attempts before being put into 'dlq'
-      numOfAttempts: process.env.SYNC_MAX_ATTEMPTS ? parseInt(process.env.SYNC_MAX_ATTEMPTS) : 40
-    },
-    // If 'nosync' is true, then the server process always places new transactions into txsync.state=0 (sync_none)
-    // In other words, then TXQ behaves as a datastore and makes no attempts to broadcast transations or settle status.
-    nosync: process.env.NOSYNC && process.env.NOSYNC === 'true' ? true : false,
-  },
-  enableUpdateLogging: true,                  // Whether to log every update entity to the database
-  merchantapi: {
-    sendPolicy: 'ALL_FIRST_PRIORITY_SUCCESS', // 'SERIAL_BACKUP' | 'ALL_FIRST_PRIORITY_SUCCESS';
-    statusPolicy: 'SERIAL_BACKUP',            // 'SERIAL_BACKUP'
-    enableResponseLogging: true,              // Whether to log every request and response from merchantapi's to the database
-    enableProxy: true,                        // Exposes /merchantapi/<miner name>/mapi/tx endpoints...
-    endpoints: {
-      livenet: [
-        {
-          name: 'merchantapi.matterpool.io',
-          url: 'https://merchantapi.matterpool.io',
-          headers: {
-          }
-        },
-        {
-          name: 'merchantapi.taal.com',
-          url: 'https://merchantapi.taal.com',
-          headers: {
-          }
-        },
-        {
-          name: 'mempool.io',
-          url: 'https://www.ddpurse.com/openapi',
-          headers: {
-            token: "561b756d12572020ea9a104c3441b71790acbbce95a6ddbf7e0630971af9424b"
-          }
-        }
-      ],
-      testnet: [
-        {
-          name: 'merchantapi-testnet.mattercloud.io',
-          url: 'https://merchantapi-testnet.mattercloud.io',
-          headers: {
-          }
-        }
-      ]
-    }
-  },
-  db: {
-    host: 'localhost',
-    user: 'postgres',
-    database: 'txq_dev',
-    password: 'postgres',
-    port: 5432,
-    max: 3,
-    idleTimeoutMillis: 3000
-  },
-  logs: {
-    level: process.env.LOG_LEVEL || 'debug',
-    logRequestsEnabled: true,
-    file: 'debug.log',
-  },
-  interceptors: [],
 };
 
-export default {
-  ...config,
-  ...require(`./${config.env}`).default,
-};
+module.exports.contextsConfig = cfg;

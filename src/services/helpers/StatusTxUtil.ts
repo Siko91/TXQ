@@ -6,21 +6,28 @@ export class StatusTxUtil {
         const isValid = statusObj && statusObj.payload &&
         statusObj.payload.returnResult === 'success' &&
         statusObj.payload.blockHeight >= 0 &&
-        statusObj.payload.confirmations >= 0 && statusObj.valid;
+        statusObj.payload.confirmations >= 0;
         return isValid;
     }
 
-    static isAcceptedPush(status: any): boolean {
+    static isAcceptedPush(statusObj: any): boolean {
+        if (!statusObj) {
+            return false;
+        }
         try {
-            const payload = JSON.parse(status.payload);
+            let payload = statusObj.payload;
+            if (typeof statusObj.payload === 'string') {
+                payload = JSON.parse(statusObj.payload);
+            }
             const txRegex = new RegExp(BitcoinRegex.TXID_REGEX);
-            return StatusTxUtil.isAcceptedBeforePush(status) || (
+            const r = StatusTxUtil.isAcceptedBeforePush(statusObj) || (
                 payload &&
                 payload.returnResult === 'success' &&
                 txRegex.test(payload.txid)
             );
+            return r;
         } catch (err) {
-            ;
+            console.log('isAcceptedPush', err);
         }
         return false;
     }
@@ -34,8 +41,8 @@ export class StatusTxUtil {
             const isValid = payload &&
                 payload.returnResult === 'failure' &&
                 (
-                    payload.resultDescription === 'ERROR: Transaction already in the mempool' ||
-                    payload.resultDescription  === 'ERROR: 257: txn-already-known'
+                    payload.resultDescription.includes('Transaction already in the mempool') ||
+                    payload.resultDescription.includes('257: txn-already-known')
                 )
             return isValid;
         } catch (err) {
