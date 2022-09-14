@@ -52,7 +52,7 @@ var cfg = {
           },
           {
             name: 'merchantapi.gorillapool.io',
-            url: 'https://merchantapi.matterpool.io',
+            url: 'https://mapi.gorillapool.io/mapi',
             headers: {}
           },
           {
